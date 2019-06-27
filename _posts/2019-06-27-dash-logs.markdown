@@ -1,0 +1,76 @@
+---
+layout: post
+title:  "Redirecting Logs to Plotly Dash"
+date:   2019-06-27 21:27:04 -0500
+categories: python, dash, plotly
+---
+
+Plotly's Dash has made it very easy to put together small dashboards; there are components for html and even custom react components that have een built onto of python objects. These can make it easy to display pandas dataframes, important metrics, or plots that update based on user interaction.  
+When you are writing applications where you want to capture some of the logs for users -- especially for internal facing cases it can be useful to capture these in the page. 
+
+One of the ways that this can be done in Python is using the built-in logging. There are great utilities for capturing streams and saving them to rotating log files or displaying them on the console. Capturing these logs and displaying them to users within the application can help advanced users determine issues when interacting due to file corruption, formatting, etc. without writing complicated UI to capture this information. In dash, decorators are used to wrap functions to allow for functions to react to user inputs and generate outputs that then update the react components.
+
+Python offers the robust logging handlers with three specific: StreamHandler, FileHandler, and NullHandler. These can be used to build out loggers as I will show below. The chocies are to either to redirect the stream to a file, read, and then display to the console or cpature the stream and display the most recent adding to the client state.  
+
+{% highlight python %}
+import dash
+import dash_core_components as dcc
+import dash_html_components as html
+from dash.dependencies import Input, Output, State
+import logging
+import sys
+
+logger = logging.getLogger(__name__)
+
+
+class DashLogger(logging.StreamHandler):
+    def __init__(self, stream=None):
+        super().__init__(stream=stream)
+        self.logs = list()
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.logs.append(msg)
+            self.logs = self.logs[-1000:]
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
+dash_logger = DashLogger(stream=sys.stdout)
+logger.addHandler(dash_logger)
+
+external_stylesheets = ['https://codepen.io/chriddyp/pen/bWLwgP.css']
+
+app = dash.Dash(__name__, external_stylesheets=external_stylesheets)
+
+app.layout = html.Div([
+    html.Div(id='my-div'),
+    html.Button('Submit', id='button'),
+    dcc.Interval(
+        id='log-update',
+        interval=1 * 1000  # in milliseconds
+    ),
+    html.Div(id='log')
+])
+
+
+@app.callback(
+    Output('log', 'children'),
+    [Input('log-update', 'n_intervals')])
+def update_logs(interval):
+    return [html.Div(log) for log in dash_logger.logs]
+
+
+@app.callback(Output('my-div', 'children'), [Input('button', 'n_clicks')])
+def add_log(click):
+    logger.warning("Important Message")
+
+
+if __name__ == '__main__':
+    app.run_server(debug=True)
+
+{% endhighlight %}
+
+The above example dash application will append html divs to the Div with the id of log.
